@@ -1,0 +1,13 @@
+/vendor/
+composer.lock
+.phpunit.result.cache
+.idea/
+.vscode/
+*.log
+
+# Docker
+.docker/
+*.env.local
+
+# Debug files
+/debug/

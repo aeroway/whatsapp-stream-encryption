@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  php:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: whatsapp-stream-encryption
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: tail -f /dev/null  # Держим контейнер запущенным
+    environment:
+      - COMPOSER_ALLOW_SUPERUSER=1
