@@ -1,9 +1,10 @@
-# Описание задачи
+# WhatsApp Stream Encryption - Техническое задание
 
-Требуется реализовать декораторы для [PSR-7 потоков](https://github.com/php-fig/http-message/blob/14b9b813c5e36af4498ef38ef97938bf7090fd52/src/StreamInterface.php), которые будут зашифровывать и расшифровывать их по алгоритмам, используемым WhatsApp.
-Текстовые описания алгоритмов можно будет найти ниже.  
+## Описание
 
-Код необходимо оформить в виде пакета для composer. От реализации ожидается промышленное качество кода.
+Реализовать декораторы для [PSR-7 потоков](https://github.com/php-fig/http-message/blob/14b9b813c5e36af4498ef38ef97938bf7090fd52/src/StreamInterface.php), которые будут зашифровывать и расшифровывать данные по алгоритмам WhatsApp.
+
+Код оформлен в виде composer пакета с промышленным качеством.
 
 Тестовые файлы можно найти в папке `samples`:
 
@@ -68,3 +69,27 @@ Then combine everything in one piece.
 
 * [jsq/psr7-stream-encryption](https://github.com/jeskew/php-encrypted-streams) - декораторы для шифрования, дешифрования и хеширования;
 * [guzzlehttp/psr7](https://github.com/guzzle/psr7) - одна из реализаций PSR-7.
+
+## Реализация
+
+### Архитектура
+
+Проект организован по принципам SOLID:
+- **Crypto/** - криптографические компоненты (HKDF, AES-CBC, HMAC)
+- **Stream/** - декораторы потоков (EncryptingStream, DecryptingStream, SidecarGeneratingStream)
+- **MediaType/** - стратегии для типов медиа (Strategy Pattern)
+- **Factory/** - фабрика для создания декораторов
+
+### Потоковая обработка
+
+Декораторы читают данные блоками по 8KB, минимизируя использование памяти:
+```php
+while (!$this->stream->eof()) {
+    $chunk = $this->stream->read(8192);
+    // обработка
+}
+```
+
+Полностью потоковое шифрование невозможно из-за ограничений алгоритма WhatsApp:
+- PKCS#7 паддинг добавляется только в конец
+- MAC вычисляется для всего зашифрованного файла

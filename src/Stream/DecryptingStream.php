@@ -5,15 +5,18 @@ declare(strict_types=1);
 namespace WhatsApp\StreamEncryption\Stream;
 
 use Psr\Http\Message\StreamInterface;
+use RuntimeException;
+use Throwable;
 use WhatsApp\StreamEncryption\Crypto\Decryptor;
 use WhatsApp\StreamEncryption\Crypto\MacGenerator;
 
 /**
- * Декоратор PSR-7 потока, который дешифрует данные
+ * Декоратор PSR-7 потока для дешифрования данных
  */
 class DecryptingStream implements StreamInterface
 {
     private const MAC_LENGTH = 10;
+    private const BUFFER_SIZE = 8192;
 
     private StreamInterface $stream;
     private Decryptor $decryptor;
@@ -21,8 +24,9 @@ class DecryptingStream implements StreamInterface
     private string $cipherKey;
     private string $iv;
     private string $macKey;
-    private ?string $decryptedCache = null;
-    private bool $isClosed = false;
+    private string $outputBuffer = '';
+    private bool $finalized = false;
+    private int $position = 0;
 
     public function __construct(
         StreamInterface $stream,
@@ -43,9 +47,8 @@ class DecryptingStream implements StreamInterface
     public function __toString(): string
     {
         try {
-            $this->rewind();
             return $this->getContents();
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             return '';
         }
     }
@@ -53,13 +56,12 @@ class DecryptingStream implements StreamInterface
     public function close(): void
     {
         $this->stream->close();
-        $this->isClosed = true;
-        $this->decryptedCache = null;
+        $this->outputBuffer = '';
     }
 
     public function detach()
     {
-        $this->decryptedCache = null;
+        $this->outputBuffer = '';
         return $this->stream->detach();
     }
 
@@ -71,12 +73,12 @@ class DecryptingStream implements StreamInterface
 
     public function tell(): int
     {
-        return 0;
+        return $this->position;
     }
 
     public function eof(): bool
     {
-        return $this->isClosed || $this->decryptedCache !== null;
+        return $this->finalized && $this->outputBuffer === '';
     }
 
     public function isSeekable(): bool
@@ -86,13 +88,12 @@ class DecryptingStream implements StreamInterface
 
     public function seek($offset, $whence = SEEK_SET): void
     {
-        throw new \RuntimeException('Stream is not seekable');
+        throw new RuntimeException('Stream is not seekable');
     }
 
     public function rewind(): void
     {
-        $this->decryptedCache = null;
-        $this->stream->rewind();
+        throw new RuntimeException('Cannot rewind decrypting stream');
     }
 
     public function isWritable(): bool
@@ -102,7 +103,7 @@ class DecryptingStream implements StreamInterface
 
     public function write($string): int
     {
-        throw new \RuntimeException('Stream is not writable');
+        throw new RuntimeException('Stream is not writable');
     }
 
     public function isReadable(): bool
@@ -112,28 +113,27 @@ class DecryptingStream implements StreamInterface
 
     public function read($length): string
     {
-        if ($this->decryptedCache === null) {
-            $this->decryptAll();
+        if (!$this->finalized) {
+            $this->processStream();
         }
 
-        $data = substr($this->decryptedCache, 0, $length);
-        $this->decryptedCache = substr($this->decryptedCache, $length);
-
-        if ($this->decryptedCache === '') {
-            $this->decryptedCache = null;
-        }
+        $bytesToRead = min($length, strlen($this->outputBuffer));
+        $data = substr($this->outputBuffer, 0, $bytesToRead);
+        $this->outputBuffer = substr($this->outputBuffer, $bytesToRead);
+        $this->position += $bytesToRead;
 
         return $data;
     }
 
     public function getContents(): string
     {
-        if ($this->decryptedCache === null) {
-            $this->decryptAll();
+        if (!$this->finalized) {
+            $this->processStream();
         }
 
-        $contents = $this->decryptedCache;
-        $this->decryptedCache = null;
+        $contents = $this->outputBuffer;
+        $this->position += strlen($contents);
+        $this->outputBuffer = '';
         return $contents;
     }
 
@@ -142,18 +142,26 @@ class DecryptingStream implements StreamInterface
         return $this->stream->getMetadata($key);
     }
 
-    private function decryptAll(): void
+    private function processStream(): void
     {
-        $encryptedData = $this->stream->getContents();
+        $encryptedData = '';
+        while (!$this->stream->eof()) {
+            $chunk = $this->stream->read(self::BUFFER_SIZE);
+            if ($chunk === '') {
+                break;
+            }
+            $encryptedData .= $chunk;
+        }
 
         if (strlen($encryptedData) < self::MAC_LENGTH) {
-            throw new \RuntimeException('Encrypted data is too short');
+            throw new RuntimeException('Encrypted data is too short');
         }
 
         $encrypted = substr($encryptedData, 0, -self::MAC_LENGTH);
         $mac = substr($encryptedData, -self::MAC_LENGTH);
 
         $this->macGenerator->validate($this->iv . $encrypted, $mac, $this->macKey);
-        $this->decryptedCache = $this->decryptor->decrypt($encrypted, $this->cipherKey, $this->iv);
+        $this->outputBuffer = $this->decryptor->decrypt($encrypted, $this->cipherKey, $this->iv);
+        $this->finalized = true;
     }
 }

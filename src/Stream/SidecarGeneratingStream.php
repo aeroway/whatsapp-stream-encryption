@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace WhatsApp\StreamEncryption\Stream;
 
 use Psr\Http\Message\StreamInterface;
+use Throwable;
 use WhatsApp\StreamEncryption\Crypto\MacGenerator;
 
 /**
@@ -52,9 +53,8 @@ class SidecarGeneratingStream implements StreamInterface
     public function __toString(): string
     {
         try {
-            $this->rewind();
             return $this->getContents();
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             return '';
         }
     }
